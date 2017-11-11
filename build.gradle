@@ -1,0 +1,136 @@
+buildscript {
+	repositories {
+	  jcenter()
+	}	
+	dependencies {
+	  // web容器，支持jetty和tomcat
+	  classpath 'org.akhikhl.gretty:gretty:1.2.4'
+	}
+}
+
+// 设置默认环境变量，默认为开发模式
+if (!project.hasProperty("env")) {
+   project.ext.set("env", "main")
+}
+
+/****引入gradle插件*****************/
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'war'
+/****jdk版本*****************/
+sourceCompatibility = 1.8
+
+/****maven仓库*****************/
+repositories {
+	mavenLocal()
+    maven {    	
+        url "http://svn.etena.cn:8081/content/groups/public/"
+    }
+    maven {    	
+        url "http://repository.ow2.org/nexus/content/repositories/public/"
+    }
+}
+/****编译编码，解决Gradle编译时出现： 编码GBK的不可映射字符*****************/
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+/****源代码文件夹设置*****************/
+sourceSets {
+	main {
+		java {
+            srcDirs = ['src/main/system', 'src/main/report','src/main/interfaces','src/main/etframework'
+                       ,'src/main/cnp/gw','src/main/cnp/basic','src/main/cnp/interfaces','src/main/cnp/productcontrol',
+                       'src/main/cnp/order','src/main/cnp/bo','src/main/cnp/allocate','src/main/cnp/number','src/main/cnp/pricecard']
+        }
+    	println '****************'+'src/'+env+'/resources'+'****************'
+    	resources {
+            srcDir 'src/'+env+'/resources'
+        }
+    }
+}
+project.ext.set("sinVersion", "1.7.2")
+/****依赖关系*****************/
+dependencies {
+	compile group: 'com.alibaba', name: 'fastjson', version: '1.2.36'
+
+	runtime group: 'mysql', name: 'mysql-connector-java', version: '5.1.43'
+			
+	testCompile	"junit:junit:4.9"
+}
+
+/****生成jar*****************/
+version = '1.7.1'//发布版本
+jar {
+	manifest {
+        attributes 'Created-By':'zuolang',//声明该文件的生成者
+        'Implementation-Title': 'resume', 
+        'Implementation-Version': version
+    }
+	//jar包包含测试代码，用于其它项目测试调用
+	from(sourceSets.test.allJava)
+}
+/****生成源码jar*****************/
+task sourceJar(type: Jar) { 
+    from sourceSets.main.allJava//主体源代码
+    from sourceSets.test.allJava//测试源代码
+    classifier "sources"
+}
+/***生成javadoc,命令行参数配置**/
+javadoc {
+	source = [sourceSets.main.allJava,sourceSets.test.allJava] //需要生成javadoc的源码包
+	classpath=configurations.testCompile
+    options.encoding = "UTF-8"
+    options.charSet = "UTF-8"
+    options.links = ["http://docs.oracle.com/javase/8/docs/api/"]
+    options.memberLevel="PACKAGE"
+}
+//生成javadoc jar
+task javadocJar(type: Jar, dependsOn: javadoc) {
+	from javadoc.destinationDir
+    classifier = 'javadoc'	    
+}
+
+task codeseed(type: JavaExec, dependsOn: 'classes') {
+    description '运行代码生成器'
+    classpath = sourceSets.main.runtimeClasspath
+    main = "et.common.codeseed.CodeSeed"
+}
+
+task copyContext(type: Copy) {
+	description '获取数据库配置文件'
+    from 'src/'+env+'/resources/context.xml'
+    into 'src/main/webapp/META-INF'
+}
+/****引入gretty插件*****************/	
+apply plugin: 'org.akhikhl.gretty'	
+gretty {
+    port = 8080
+    servletContainer = 'tomcat8'
+	contextPath ="/cnpnb"
+	enableNaming=true //启用JNDI
+	//scanInterval 0//关闭热部署
+	/**
+	 * Tomcat启动，增加启动参数，用来判断是否需要启用业务定时接口
+	 * 不包含：中间件运行坏境监控-RunTimeTraceTimer
+	 * 主要用于集群环境，多个Tomcat时，指定某个Tomcat运行定时接口，其他不运行
+	 */
+	jvmArgs  '-DuseTimer=true'
+}
+/****单元测试：包含Test类，不包含IntegrationTest类*****************/	
+test {
+  include '**/Test*.*'
+  include '**/*Test.*'
+  exclude '**/*IntegrationTest.*'
+  doFirst {
+	  testReportDirName= "tests"
+  }
+}
+/****集成测试：包含IntegrationTest类。测试前自动启动tomcat，测试后自动关闭*****************/
+task integrationTest(type: Test) {
+  //Always run tests
+  outputs.upToDateWhen {false}
+  ignoreFailures = true
+  include '**/*IntegrationTest.*'
+  doFirst {
+	  testReportDirName= "integrationtests"
+  }
+}
